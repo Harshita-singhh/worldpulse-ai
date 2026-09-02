@@ -1,10 +1,14 @@
 from fastapi import FastAPI
 
+from .api.events import router as events_router
+
 app = FastAPI(
     title="WorldPulse AI API",
     description="Backend API for the WorldPulse AI global events intelligence platform.",
     version="0.1.0",
 )
+
+app.include_router(events_router)
 
 
 @app.get("/")
