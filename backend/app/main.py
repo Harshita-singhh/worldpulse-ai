@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 
 from .api.events import router as events_router
+from .api.ingestion import router as ingestion_router
 
 app = FastAPI(
     title="WorldPulse AI API",
@@ -9,7 +10,7 @@ app = FastAPI(
 )
 
 app.include_router(events_router)
-
+app.include_router(ingestion_router)
 
 @app.get("/")
 def root():
