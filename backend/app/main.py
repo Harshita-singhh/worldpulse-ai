@@ -4,6 +4,7 @@ from fastapi import FastAPI
 
 from .api.events import router as events_router
 from .api.ingestion import router as ingestion_router
+from .api.intelligence import router as intelligence_router
 from .scheduler import start_scheduler, stop_scheduler
 
 
@@ -21,8 +22,10 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+
 app.include_router(events_router)
 app.include_router(ingestion_router)
+app.include_router(intelligence_router)
 
 
 @app.get("/")
