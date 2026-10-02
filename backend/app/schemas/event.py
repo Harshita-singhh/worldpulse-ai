@@ -49,5 +49,20 @@ class EventResponse(BaseModel):
     event_type: str | None = None
 
     usgs_url: str | None = None
+    source_url: str | None = None
+    image_url: str | None = None
 
     updated_at: datetime | None = None
+
+    # =====================================================
+    # NASA FIRMS WILDFIRE DETECTIONS
+    # =====================================================
+
+    fire_radiative_power: Decimal | None = None
+    fire_confidence: str | None = None
+    satellite: str | None = None
+    instrument: str | None = None
+    brightness_temperature_ti4: Decimal | None = None
+    brightness_temperature_ti5: Decimal | None = None
+    daynight: str | None = None
+    source_version: str | None = None

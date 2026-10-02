@@ -43,6 +43,16 @@ function getMarkerRadius(severity) {
   }
 }
 
+function getWildfireMarkerRadius(event) {
+  const frp = Number(event.fire_radiative_power || 0);
+
+  if (!Number.isFinite(frp) || frp <= 0) {
+    return 6;
+  }
+
+  return Math.min(15, Math.max(6, frp * 0.55));
+}
+
 /* =========================================================
    COUNTRY CENTERS
 ========================================================= */
@@ -111,10 +121,15 @@ function MapUpdater({ selectedCountry }) {
   const map = useMap();
 
   useEffect(() => {
+    const reduceMotion = window.matchMedia(
+      "(prefers-reduced-motion: reduce)"
+    ).matches;
     if (!selectedCountry) {
-      map.flyTo([20, 0], 2, {
-        duration: 1.2,
-      });
+      if (reduceMotion) {
+        map.setView([20, 0], 2);
+      } else {
+        map.flyTo([20, 0], 2, { duration: 1.2 });
+      }
 
       return;
     }
@@ -122,13 +137,108 @@ function MapUpdater({ selectedCountry }) {
     const center = COUNTRY_CENTERS[selectedCountry];
 
     if (center) {
-      map.flyTo(center, 5, {
-        duration: 1.2,
-      });
+      if (reduceMotion) {
+        map.setView(center, 5);
+      } else {
+        map.flyTo(center, 5, { duration: 1.2 });
+      }
     }
   }, [selectedCountry, map]);
 
   return null;
+}
+
+function MapFocusUpdater({ focusLocation }) {
+  const map = useMap();
+
+  useEffect(() => {
+    if (
+      !focusLocation ||
+      !Number.isFinite(focusLocation.latitude) ||
+      !Number.isFinite(focusLocation.longitude)
+    ) {
+      return;
+    }
+
+    const center = [focusLocation.latitude, focusLocation.longitude];
+    const zoom = Math.max(map.getZoom(), 6);
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      map.setView(center, zoom);
+    } else {
+      map.flyTo(center, zoom, { duration: 0.8 });
+    }
+  }, [focusLocation, map]);
+
+  return null;
+}
+
+function MapZoomTracker({ onZoomChange }) {
+  const map = useMap();
+
+  useEffect(() => {
+    const updateZoom = () => onZoomChange(map.getZoom());
+    updateZoom();
+    map.on("zoomend", updateZoom);
+
+    return () => map.off("zoomend", updateZoom);
+  }, [map, onZoomChange]);
+
+  return null;
+}
+
+function EventCluster({
+  events,
+  center,
+  color,
+  radius,
+  onEventSelect,
+}) {
+  const map = useMap();
+
+  return (
+    <CircleMarker
+      center={center}
+      radius={radius}
+      pathOptions={{
+        color,
+        fillColor: color,
+        fillOpacity: 0.75,
+        weight: 2,
+      }}
+      eventHandlers={{
+        click: () => {
+          const zoom = Math.min(map.getZoom() + 2, 8);
+          if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+            map.setView(center, zoom);
+          } else {
+            map.flyTo(center, zoom, { duration: 0.7 });
+          }
+        },
+      }}
+    >
+      <Popup>
+        <div className="map-popup cluster-popup">
+          <h3>{events.length} nearby events</h3>
+          <p>Zoom in to explore the grouped records.</p>
+          <ul>
+            {events.slice(0, 12).map((event) => (
+              <li key={event.id}>
+                <button
+                  type="button"
+                  onClick={() => onEventSelect?.(event)}
+                >
+                  {event.title || "Untitled event"}
+                </button>
+              </li>
+            ))}
+          </ul>
+          {events.length > 12 && (
+            <p>Showing 12 of {events.length} records.</p>
+          )}
+        </div>
+      </Popup>
+    </CircleMarker>
+  );
 }
 
 /* =========================================================
@@ -174,8 +284,10 @@ function WorldMap({
   events = [],
   severityFilter = "ALL",
   onEventSelect,
+  focusLocation = null,
 }) {
   const [selectedCountry, setSelectedCountry] = useState("");
+  const [zoom, setZoom] = useState(2);
 
   /*
    * Countries currently available in the event dataset.
@@ -221,6 +333,27 @@ function WorldMap({
       matchesCountry
     );
   });
+
+  const eventClusters = useMemo(() => {
+    if (zoom >= 6) {
+      return mappedEvents.map((event) => [event]);
+    }
+
+    const cellSize = zoom < 3 ? 8 : zoom < 4 ? 4 : 2;
+    const groups = new Map();
+
+    mappedEvents.forEach((event) => {
+      const key = [
+        Math.floor(Number(event.latitude) / cellSize),
+        Math.floor(Number(event.longitude) / cellSize),
+      ].join(":");
+      const group = groups.get(key) || [];
+      group.push(event);
+      groups.set(key, group);
+    });
+
+    return [...groups.values()];
+  }, [mappedEvents, zoom]);
 
   return (
     <div className="world-map">
@@ -293,6 +426,8 @@ function WorldMap({
         <MapUpdater
           selectedCountry={selectedCountry}
         />
+        <MapFocusUpdater focusLocation={focusLocation} />
+        <MapZoomTracker onZoomChange={setZoom} />
 
         {/* Dark World Basemap */}
         <TileLayer
@@ -304,18 +439,72 @@ function WorldMap({
             EVENT MARKERS
         ================================================= */}
 
-        {mappedEvents.map((event) => {
+        {eventClusters.map((cluster, clusterIndex) => {
+          if (cluster.length > 1) {
+            const center = [
+              cluster.reduce(
+                (sum, event) => sum + Number(event.latitude),
+                0
+              ) / cluster.length,
+              cluster.reduce(
+                (sum, event) => sum + Number(event.longitude),
+                0
+              ) / cluster.length,
+            ];
+            const wildfireCount = cluster.filter(
+              (event) =>
+                event.category?.toLowerCase() === "wildfire" ||
+                event.source?.toUpperCase() === "NASA_FIRMS"
+            ).length;
+            const clusterColor =
+              wildfireCount > cluster.length / 2
+                ? "#ff8d4d"
+                : "#718cff";
+
+            return (
+              <EventCluster
+                key={`cluster-${clusterIndex}-${cluster[0].id}`}
+                events={cluster}
+                center={center}
+                color={clusterColor}
+                radius={Math.min(
+                  16,
+                  8 + Math.log2(cluster.length) * 1.5
+                )}
+                onEventSelect={onEventSelect}
+              />
+            );
+          }
+
+          const event = cluster[0];
+          const categoryLabel =
+            (event.category || "").toLowerCase();
+
+          const isWildfire =
+            categoryLabel === "wildfire" ||
+            categoryLabel.includes("wildfire") ||
+            event.source?.toUpperCase() === "NASA_FIRMS";
+
           const severity =
             event.severity?.toUpperCase() || "LOW";
 
-          const color =
-            getSeverityColor(severity);
+          const color = isWildfire
+            ? "#ff8d4d"
+            : categoryLabel === "weather"
+              ? "#54a9d8"
+              : categoryLabel === "news"
+                ? "#a78bfa"
+                : getSeverityColor(severity);
 
           const latitude =
             Number(event.latitude);
 
           const longitude =
             Number(event.longitude);
+
+          const radius = isWildfire
+            ? getWildfireMarkerRadius(event)
+            : getMarkerRadius(severity);
 
           return (
             <CircleMarker
@@ -324,17 +513,13 @@ function WorldMap({
                 latitude,
                 longitude,
               ]}
-              radius={getMarkerRadius(
-                severity
-              )}
+              radius={radius}
               pathOptions={{
                 color,
                 fillColor: color,
                 fillOpacity: 0.85,
                 weight:
-                  severity === "CRITICAL"
-                    ? 2
-                    : 1,
+                  isWildfire ? 1.5 : severity === "CRITICAL" ? 2 : 1,
               }}
               eventHandlers={{
                 click: () => {
@@ -415,6 +600,63 @@ function WorldMap({
                     </p>
                   )}
 
+                  {(event.source_url || event.usgs_url) && (
+                    <p>
+                      <strong>Source record:</strong>{" "}
+                      <a
+                        href={event.source_url || event.usgs_url}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        Open source
+                      </a>
+                    </p>
+                  )}
+
+                  {isWildfire && (
+                    <>
+                      <p>
+                        <strong>FRP:</strong>{" "}
+                        {Number(
+                          event.fire_radiative_power || 0
+                        ).toFixed(2)} MW
+                      </p>
+
+                      <p>
+                        <strong>Detection confidence:</strong>{" "}
+                        {event.fire_confidence || "Unknown"}
+                      </p>
+
+                      <p>
+                        <strong>Satellite:</strong>{" "}
+                        {event.satellite || "Unknown"}
+                      </p>
+
+                      <p>
+                        <strong>Instrument:</strong>{" "}
+                        {event.instrument || "Unknown"}
+                      </p>
+
+                      <p>
+                        <strong>Day/Night:</strong>{" "}
+                        {event.daynight || "Unknown"}
+                      </p>
+
+                      <p>
+                        <strong>Brightness temp:</strong>{" "}
+                        {event.brightness_temperature_ti4 ||
+                          event.brightness_temperature_ti5
+                          ? `${event.brightness_temperature_ti4 || "-"} / ${event.brightness_temperature_ti5 || "-"}`
+                          : "Unknown"}
+                      </p>
+
+                      <p>
+                        <strong>FIRMS version:</strong>{" "}
+                        {event.source_version || "Unknown"}
+                      </p>
+                    </>
+                  )}
+
                   {/* Confidence */}
                   {event.confidence !== undefined && (
                     <p>
@@ -464,14 +706,14 @@ function WorldMap({
 
           <strong>
             {selectedCountry
-              ? `No events in ${selectedCountry}`
-              : "No events found"}
+              ? `Nothing is lighting up in ${selectedCountry} yet.`
+              : "Nothing is lighting up here yet."}
           </strong>
 
           <span>
             {selectedCountry
-              ? "No events match the current filters for this country."
-              : "No events match the current filter."}
+              ? "Try another category or return to Global."
+              : "Try another category or return to Global."}
           </span>
 
         </div>

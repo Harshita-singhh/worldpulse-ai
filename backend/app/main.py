@@ -1,3 +1,4 @@
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -6,7 +7,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from .api.events import router as events_router
 from .api.ingestion import router as ingestion_router
 from .api.intelligence import router as intelligence_router
+from .api.news import router as news_router
 from .api.weather import router as weather_router
+from .api.wildfires import router as wildfires_router
 from .scheduler import start_scheduler, stop_scheduler
 
 
@@ -25,13 +28,19 @@ app = FastAPI(
 )
 
 
-# Allow the React frontend to communicate with the FastAPI backend.
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
+configured_origins = os.getenv("CORS_ORIGINS")
+allowed_origins = (
+    [origin.strip() for origin in configured_origins.split(",") if origin.strip()]
+    if configured_origins
+    else [
         "http://localhost:5173",
         "http://127.0.0.1:5173",
-    ],
+    ]
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -42,6 +51,8 @@ app.include_router(events_router)
 app.include_router(ingestion_router)
 app.include_router(intelligence_router)
 app.include_router(weather_router)
+app.include_router(wildfires_router)
+app.include_router(news_router)
 
 @app.get("/")
 def root():

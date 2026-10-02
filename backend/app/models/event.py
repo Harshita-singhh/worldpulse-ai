@@ -50,5 +50,20 @@ class Event(Base):
     event_type = Column(String(50))
 
     usgs_url = Column(Text)
+    source_url = Column(Text)
+    image_url = Column(Text)
 
     updated_at = Column(DateTime)
+
+    # =====================================================
+    # NASA FIRMS WILDFIRE DETECTIONS
+    # =====================================================
+
+    fire_radiative_power = Column(Numeric(10, 2))
+    fire_confidence = Column(String(20))
+    satellite = Column(String(20))
+    instrument = Column(String(20))
+    brightness_temperature_ti4 = Column(Numeric(8, 2))
+    brightness_temperature_ti5 = Column(Numeric(8, 2))
+    daynight = Column(String(1))
+    source_version = Column(String(50))

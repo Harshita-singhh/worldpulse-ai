@@ -1,5 +1,10 @@
 .venv/
 .env
+.env.*
+!.env.example
+node_modules/
+dist/
+.pytest_cache/
 
 # Python cache
 __pycache__/

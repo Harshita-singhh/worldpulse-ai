@@ -2,99 +2,229 @@ import { useEffect, useMemo, useState } from "react";
 import WorldMap from "./WorldMap";
 import "./App.css";
 
-const API_BASE_URL = "http://127.0.0.1:8000";
+const API_BASE_URL = (
+  import.meta.env.VITE_API_BASE_URL ||
+  (import.meta.env.DEV ? "http://127.0.0.1:8000" : "")
+).replace(/\/+$/, "");
+const DASHBOARD_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
+
+const DISCOVERY_CATEGORIES = [
+  { id: "ALL", label: "For you", icon: "✦" },
+  { id: "WORLD", label: "World", icon: "◎" },
+  { id: "INDIA", label: "India", icon: "◈" },
+  { id: "earthquake", label: "Earthquakes", icon: "⌁" },
+  { id: "wildfire", label: "Wildfires", icon: "♨" },
+  { id: "weather", label: "Weather", icon: "☼" },
+  { id: "NEWS", label: "News", icon: "▤" },
+  { id: "SPORTS", label: "Sports", icon: "◉" },
+  { id: "BOLLYWOOD", label: "Bollywood", icon: "✧" },
+  { id: "TECH", label: "Tech", icon: "⌘" },
+  { id: "SCIENCE", label: "Science", icon: "⌬" },
+  { id: "BUSINESS", label: "Business", icon: "↗" },
+];
+
+const NEWS_CATEGORIES = [
+  { id: "TRENDING", label: "Trending", icon: "↗" },
+  { id: "WORLD", label: "World", icon: "◎" },
+  { id: "INDIA", label: "India", icon: "◈" },
+  { id: "SPORTS", label: "Sports", icon: "◉" },
+  { id: "BOLLYWOOD", label: "Bollywood", icon: "✧" },
+  { id: "TECH", label: "Tech", icon: "⌘" },
+  { id: "SCIENCE", label: "Science", icon: "⌬" },
+  { id: "BUSINESS", label: "Business", icon: "↗" },
+  { id: "CLIMATE", label: "Climate", icon: "⌁" },
+  { id: "ENTERTAINMENT", label: "Entertainment", icon: "✦" },
+];
+
+const NEWS_SHELF_CATEGORIES = [
+  "WORLD",
+  "INDIA",
+  "SPORTS",
+  "BOLLYWOOD",
+  "TECH",
+  "SCIENCE",
+  "BUSINESS",
+  "CLIMATE",
+];
 
 function App() {
   const [summary, setSummary] = useState(null);
-const [events, setEvents] = useState([]);
-const [weather, setWeather] = useState([]);
-const [error, setError] = useState(null);
-const [weatherSignals, setWeatherSignals] = useState([]);
+  const [events, setEvents] = useState([]);
+  const [weather, setWeather] = useState([]);
+  const [error, setError] = useState(null);
+  const [weatherSignals, setWeatherSignals] = useState([]);
+  const [wildfireIntelligence, setWildfireIntelligence] =
+    useState(null);
+  const [newsItems, setNewsItems] = useState([]);
+  const [activityAnalytics, setActivityAnalytics] =
+    useState(null);
 
   const [severityFilter, setSeverityFilter] = useState("ALL");
+  const [categoryFilter, setCategoryFilter] = useState("ALL");
   const [search, setSearch] = useState("");
   const [selectedEvent, setSelectedEvent] = useState(null);
+  const [refreshError, setRefreshError] = useState(null);
+  const [lastUpdatedAt, setLastUpdatedAt] = useState(null);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [activeDiscoveryCategory, setActiveDiscoveryCategory] =
+    useState("ALL");
+  const [activeNewsCategory, setActiveNewsCategory] =
+    useState("TRENDING");
+  const [mapFocusTarget, setMapFocusTarget] = useState(null);
+  const [loading, setLoading] = useState({
+    summary: true,
+    events: true,
+    weather: true,
+    wildfire: true,
+    news: true,
+  });
 
   /* =========================================================
      LOAD DASHBOARD DATA
   ========================================================= */
 
   useEffect(() => {
+    let active = true;
+    let hasCoreData = false;
+    let refreshInProgress = false;
+    let activeController;
+    let timeoutId;
+
+    const endpoints = [
+      {
+        label: "global summary",
+        path: "/intelligence/summary",
+        update: (data) => setSummary(requireObjectResponse(data)),
+      },
+      {
+        label: "events",
+        path: "/events?limit=2000",
+        update: (data) =>
+          setEvents(normalizeArrayResponse(data, "events")),
+      },
+      {
+        label: "weather",
+        path: "/weather/current",
+        update: (data) =>
+          setWeather(normalizeArrayResponse(data, "cities")),
+      },
+      {
+        label: "weather signals",
+        path: "/weather/signals",
+        update: (data) =>
+          setWeatherSignals(normalizeArrayResponse(data, "signals")),
+      },
+      {
+        label: "wildfire intelligence",
+        path: "/intelligence/wildfires",
+        update: (data) =>
+          setWildfireIntelligence(requireObjectResponse(data)),
+      },
+      {
+        label: "news",
+        path: "/news?limit=1000",
+        update: (data) =>
+          setNewsItems(normalizeArrayResponse(data, "news")),
+      },
+      {
+        label: "activity analytics",
+        path: "/intelligence/analytics",
+        update: (data) =>
+          setActivityAnalytics(requireObjectResponse(data)),
+      },
+    ];
+
     async function loadDashboard() {
-      try {
-        const [
-          summaryResponse,
-          eventsResponse,
-          weatherResponse,
-          signalsResponse,
-        ] = await Promise.all([
-          fetch(`${API_BASE_URL}/intelligence/summary`),
-          fetch(`${API_BASE_URL}/events`),
-          fetch(`${API_BASE_URL}/weather/current`),
-          fetch(`${API_BASE_URL}/weather/signals`),
-        ]);
-  
-        if (!summaryResponse.ok) {
-          throw new Error(
-            "Failed to fetch WorldPulse intelligence"
-          );
-        }
-  
-        if (!eventsResponse.ok) {
-          throw new Error(
-            "Failed to fetch WorldPulse events"
-          );
-        }
-  
-        if (!weatherResponse.ok) {
-          throw new Error(
-            "Failed to fetch WorldPulse weather"
-          );
-        }
-  
-        if (!signalsResponse.ok) {
-          throw new Error(
-            "Failed to fetch WorldPulse weather signals"
-          );
-        }
-  
-        const summaryData =
-          await summaryResponse.json();
-  
-        const eventsData =
-          await eventsResponse.json();
-  
-        const weatherData =
-          await weatherResponse.json();
-  
-        const signalsData =
-          await signalsResponse.json();
-  
-        setSummary(summaryData);
-  
-        setEvents(
-          Array.isArray(eventsData)
-            ? eventsData
-            : eventsData.events || []
-        );
-  
-        setWeather(
-          Array.isArray(weatherData)
-            ? weatherData
-            : weatherData.cities || []
-        );
-  
-        setWeatherSignals(
-          Array.isArray(signalsData)
-            ? signalsData
-            : signalsData.signals || []
-        );
-      } catch (err) {
-        setError(err.message);
+      if (refreshInProgress) {
+        return;
       }
+
+      refreshInProgress = true;
+      activeController = new AbortController();
+      timeoutId = window.setTimeout(
+        () => activeController?.abort(),
+        30_000
+      );
+      const results = await Promise.allSettled(
+        endpoints.map(async ({ path }) => {
+          const response = await fetch(
+            `${API_BASE_URL}${path}`,
+            {
+              signal: activeController.signal,
+              cache: "no-store",
+            }
+          );
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+          }
+          return response.json();
+        })
+      );
+
+      window.clearTimeout(timeoutId);
+      if (!active) {
+        return;
+      }
+
+      const failures = [];
+      const succeeded = new Set();
+
+      results.forEach((result, index) => {
+        if (result.status === "fulfilled") {
+          try {
+            endpoints[index].update(result.value);
+            succeeded.add(endpoints[index].label);
+          } catch {
+            failures.push(endpoints[index].label);
+          }
+        } else {
+          failures.push(endpoints[index].label);
+        }
+        setLoading((current) => ({
+          ...current,
+          [endpoints[index].label === "global summary"
+            ? "summary"
+            : endpoints[index].label === "wildfire intelligence"
+              ? "wildfire"
+              : endpoints[index].label]: false,
+        }));
+      });
+
+      const coreLoaded =
+        succeeded.has("global summary") &&
+        succeeded.has("events");
+
+      if (coreLoaded) {
+        hasCoreData = true;
+        setError(null);
+        setLastUpdatedAt(new Date());
+        setCurrentTime(Date.now());
+      } else if (!hasCoreData) {
+        setError(
+          "WorldPulse dashboard data is temporarily unavailable."
+        );
+      }
+
+      setRefreshError(
+        failures.length > 0
+          ? `Some data could not be refreshed: ${failures.join(", ")}. Showing the latest available data.`
+          : null
+      );
+      refreshInProgress = false;
     }
-  
-    loadDashboard();
+
+    void loadDashboard();
+    const refreshTimer = window.setInterval(
+      () => void loadDashboard(),
+      DASHBOARD_REFRESH_INTERVAL_MS
+    );
+
+    return () => {
+      active = false;
+      activeController?.abort();
+      window.clearTimeout(timeoutId);
+      window.clearInterval(refreshTimer);
+    };
   }, []);
 
   /* =========================================================
@@ -111,6 +241,22 @@ const [weatherSignals, setWeatherSignals] = useState([]);
           severityFilter;
 
       if (!matchesSeverity) {
+        return false;
+      }
+
+      const matchesCategory =
+        categoryFilter === "ALL" ||
+        event.category?.toLowerCase() === categoryFilter;
+
+      if (!matchesCategory) {
+        return false;
+      }
+
+      if (
+        activeDiscoveryCategory === "INDIA" &&
+        event.country?.toLowerCase() !== "india" &&
+        !normalizeNewsCategory(event.event_type).includes("INDIA")
+      ) {
         return false;
       }
 
@@ -133,7 +279,80 @@ const [weatherSignals, setWeatherSignals] = useState([]);
 
       return searchableText.includes(query);
     });
-  }, [events, severityFilter, search]);
+  }, [
+    events,
+    severityFilter,
+    categoryFilter,
+    activeDiscoveryCategory,
+    search,
+  ]);
+
+  const visibleNewsItems = useMemo(() => {
+    if (activeNewsCategory === "TRENDING") {
+      return newsItems;
+    }
+
+    return newsItems.filter(
+      (article) =>
+        normalizeNewsCategory(article.event_type) === activeNewsCategory
+    );
+  }, [activeNewsCategory, newsItems]);
+
+  const newsShelves = useMemo(
+    () =>
+      NEWS_SHELF_CATEGORIES.map((category) => ({
+        category,
+        articles: newsItems
+          .filter(
+            (article) =>
+              normalizeNewsCategory(article.event_type) === category
+          )
+          .slice(0, 12),
+      })).filter(({ articles }) => articles.length > 0),
+    [newsItems]
+  );
+
+  const scrollToSection = (sectionId) => {
+    document.getElementById(sectionId)?.scrollIntoView({
+      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+        ? "auto"
+        : "smooth",
+      block: "start",
+    });
+  };
+
+  const selectDiscoveryCategory = (category) => {
+    setActiveDiscoveryCategory(category);
+
+    const mapCategories = {
+      earthquake: "earthquake",
+      wildfire: "wildfire",
+      weather: "weather",
+    };
+    setCategoryFilter(mapCategories[category] || "ALL");
+
+    const newsCategory =
+      category === "ALL" || category === "NEWS"
+        ? "TRENDING"
+        : category.toUpperCase();
+    if (NEWS_CATEGORIES.some(({ id }) => id === newsCategory)) {
+      setActiveNewsCategory(newsCategory);
+    }
+
+    scrollToSection(
+      mapCategories[category] ? "global-map" : "news-discovery"
+    );
+  };
+
+  const focusMapLocation = (latitude, longitude) => {
+    setActiveDiscoveryCategory("wildfire");
+    setCategoryFilter("wildfire");
+    setMapFocusTarget({
+      latitude,
+      longitude,
+    });
+    scrollToSection("global-map");
+  };
 
   /* =========================================================
      DERIVED INTELLIGENCE
@@ -209,7 +428,7 @@ const happeningNow = useMemo(() => {
       event.severity?.toUpperCase()
     ] || 0;
 
-  const now = Date.now();
+  const now = currentTime;
 
   const recent24h = validEvents.filter((event) => {
     const eventTime = getTime(event);
@@ -264,7 +483,27 @@ const happeningNow = useMemo(() => {
         ) === index
     )
     .slice(0, 4);
-}, [events]);
+}, [events, currentTime]);
+
+  const recentEvents = useMemo(
+    () =>
+      [...events]
+        .sort((left, right) => {
+          const leftTime = left.occurred_at
+            ? new Date(left.occurred_at).getTime()
+            : 0;
+          const rightTime = right.occurred_at
+            ? new Date(right.occurred_at).getTime()
+            : 0;
+
+          return (
+            (Number.isFinite(rightTime) ? rightTime : 0) -
+            (Number.isFinite(leftTime) ? leftTime : 0)
+          );
+        })
+        .slice(0, 12),
+    [events]
+  );
 
   /* =========================================================
      CATEGORY ANALYSIS
@@ -309,6 +548,30 @@ const happeningNow = useMemo(() => {
       .slice(0, 5);
   }, [events]);
 
+  const wildfireHotspots = useMemo(() => {
+    if (!Array.isArray(wildfireIntelligence?.top_hotspots)) {
+      return [];
+    }
+
+    return wildfireIntelligence.top_hotspots
+      .map((hotspot) => ({
+        latitude: Number(hotspot.latitude),
+        longitude: Number(hotspot.longitude),
+        detections: Number(hotspot.detections || 0),
+        total_frp_mw: Number(hotspot.total_frp_mw || 0),
+        average_frp_mw: Number(hotspot.average_frp_mw || 0),
+        satellites: Array.isArray(hotspot.satellites)
+          ? hotspot.satellites
+          : [],
+      }))
+      .filter(
+        (hotspot) =>
+          Number.isFinite(hotspot.latitude) &&
+          Number.isFinite(hotspot.longitude)
+      )
+      .slice(0, 6);
+  }, [wildfireIntelligence]);
+
   /* =========================================================
      HOTSPOTS
   ========================================================= */
@@ -349,17 +612,7 @@ const happeningNow = useMemo(() => {
 
     return Object.entries(counts)
       .sort((a, b) => {
-        const scoreA =
-          a[1].total +
-          a[1].high * 3 +
-          a[1].critical * 6;
-
-        const scoreB =
-          b[1].total +
-          b[1].high * 3 +
-          b[1].critical * 6;
-
-        return scoreB - scoreA;
+        return b[1].total - a[1].total;
       })
       .slice(0, 6);
   }, [events]);
@@ -369,7 +622,7 @@ const happeningNow = useMemo(() => {
   ========================================================= */
 
   const recentActivity = useMemo(() => {
-    const now = Date.now();
+    const now = currentTime;
 
     const buckets = [
       {
@@ -434,7 +687,7 @@ const happeningNow = useMemo(() => {
         count,
       };
     });
-  }, [events]);
+  }, [events, currentTime]);
 
   const maxRecentActivity =
     Math.max(
@@ -460,11 +713,11 @@ const happeningNow = useMemo(() => {
       hotspotStats[0]?.[0] ||
       "multiple regions";
 
-    let status = "STABLE";
+    let status = "MONITORING";
     let statusClass = "stable";
 
     if (criticalCount > 0) {
-      status = "ELEVATED";
+      status = "ELEVATED ACTIVITY";
       statusClass = "elevated";
     }
 
@@ -477,24 +730,24 @@ const happeningNow = useMemo(() => {
     }
 
     let headline =
-      "Global event activity remains distributed across multiple regions.";
+      `${totalEvents} source-attributed event records are available in the monitored dataset.`;
 
     if (highSeverity > 0) {
       headline =
-        `Elevated activity detected with ${highSeverity} high-priority events requiring attention.`;
+        `Stored event records include ${highSeverity} high- or critical-severity items.`;
     }
 
     let assessment =
-      "Most monitored events are currently classified as low severity.";
+      "Severity labels reflect the stored event classifications.";
 
     if (criticalCount > 0) {
       assessment =
-        `${criticalCount} critical event${
+        `${criticalCount} stored event${
           criticalCount > 1 ? "s" : ""
-        } detected. Continued monitoring is recommended.`;
+        } are classified as critical.`;
     } else if (highCount > 0) {
       assessment =
-        `${highCount} high-severity events are currently driving the priority signal.`;
+        `${highCount} stored event${highCount === 1 ? "" : "s"} are classified as high severity.`;
     }
 
     return {
@@ -513,46 +766,57 @@ const happeningNow = useMemo(() => {
     highCount,
     highSeverity,
     highPriorityPercentage,
+    totalEvents,
   ]);
 
-  /* =========================================================
-     ERROR
-  ========================================================= */
+  const globalBriefFacts = useMemo(() => {
+    const facts = [];
 
-  if (error) {
-    return (
-      <div className="app">
-        <div className="error-screen">
-          <h1>WORLDPULSE AI</h1>
+    if (activityAnalytics) {
+      facts.push(
+        `${activityAnalytics.events_last_24h ?? 0} stored events occurred in the last 24 hours; ${activityAnalytics.events_last_7d ?? 0} occurred in the last 7 days.`
+      );
 
-          <p>{error}</p>
+      const leadingRegion =
+        activityAnalytics.top_active_regions?.[0];
+      if (leadingRegion) {
+        facts.push(
+          `${leadingRegion.region} has the highest recorded activity in the past 7 days (${leadingRegion.events_last_7d} events).`
+        );
+      }
+    }
 
-          <span>
-            Make sure the FastAPI backend is running
-            on port 8000.
-          </span>
-        </div>
-      </div>
-    );
-  }
+    if (wildfireIntelligence) {
+      facts.push(
+        `NASA FIRMS data includes ${wildfireIntelligence.valid_detections ?? wildfireIntelligence.total_detections ?? 0} valid satellite detections across ${wildfireIntelligence.hotspot_count ?? 0} activity hotspots.`
+      );
+    }
 
-  /* =========================================================
-     LOADING
-  ========================================================= */
+    if (weatherSignals.length > 0) {
+      facts.push(
+        `Weather analysis currently reports ${weatherSignals.length} signal${weatherSignals.length === 1 ? "" : "s"} across monitored cities.`
+      );
+    } else if (weather.length > 0) {
+      facts.push(
+        `Open-Meteo conditions are available for ${weather.length} monitored cities; no significant weather signals are reported.`
+      );
+    }
 
-  if (!summary) {
-    return (
-      <div className="app">
-        <div className="loading-screen">
-          <div className="loading-dot"></div>
+    const latestNews = newsItems[0];
+    if (latestNews) {
+      facts.push(
+        `Latest stored news: “${latestNews.title}” (${latestNews.source}).`
+      );
+    }
 
-          <p>
-            Connecting to WorldPulse intelligence...
-          </p>
-        </div>
-      </div>
-    );
-  }
+    return facts;
+  }, [
+    activityAnalytics,
+    newsItems,
+    weather,
+    weatherSignals,
+    wildfireIntelligence,
+  ]);
 
   return (
     <div className="app">
@@ -585,74 +849,103 @@ const happeningNow = useMemo(() => {
         <div className="live-status">
           <span className="live-dot"></span>
           LIVE
+          <span className="last-updated">
+            {lastUpdatedAt
+              ? `Checked ${formatClockTime(lastUpdatedAt)}`
+              : "Connecting"}
+          </span>
         </div>
       </header>
 
+      {refreshError && (
+        <div className="refresh-status" role="status">
+          {refreshError}
+        </div>
+      )}
+      {error && (
+        <div className="refresh-status connection-status" role="alert">
+          {error} The dashboard will retry automatically.
+        </div>
+      )}
+
       <main className="dashboard">
 
-        {/* =================================================
-            KPI CARDS
-        ================================================= */}
-
-        <section className="kpi-grid">
-
-          <div className="kpi-card">
-            <span className="kpi-label">
-              TOTAL EVENTS
-            </span>
-
-            <strong>
-              {totalEvents}
-            </strong>
-
-            <span className="kpi-description">
-              Events monitored
-            </span>
+        <section className="intro-hero">
+          <div className="hero-copy">
+            <span className="hero-kicker">A clearer view of a changing world</span>
+            <h1>WORLD PULSE<span>.</span></h1>
+            <p>Global signals. One place.</p>
+            <div className="hero-actions">
+              <button
+                type="button"
+                className="hero-cta"
+                onClick={() => scrollToSection("global-map")}
+              >
+                Explore the world <span aria-hidden="true">↗</span>
+              </button>
+              <span className="hero-updated">
+                {lastUpdatedAt
+                  ? `Updated ${formatRelativeTime(lastUpdatedAt)}`
+                  : "Waiting for live data"}
+              </span>
+            </div>
           </div>
-
-          <div className="kpi-card">
-            <span className="kpi-label">
-              LAST 24 HOURS
-            </span>
-
-            <strong>
-              {summary.events_last_24h}
-            </strong>
-
-            <span className="kpi-description">
-              Recently detected
-            </span>
+          <div className="hero-orbit" aria-hidden="true">
+            <span className="orbit-ring orbit-ring-outer" />
+            <span className="orbit-ring orbit-ring-inner" />
+            <span className="orbit-core">◉</span>
+            <span className="orbit-signal signal-one" />
+            <span className="orbit-signal signal-two" />
           </div>
-
-          <div className="kpi-card warning">
-            <span className="kpi-label">
-              HIGH SEVERITY
-            </span>
-
-            <strong>
-              {highCount}
-            </strong>
-
-            <span className="kpi-description">
-              Events requiring attention
-            </span>
-          </div>
-
-          <div className="kpi-card critical">
-            <span className="kpi-label">
-              CRITICAL
-            </span>
-
-            <strong>
-              {criticalCount}
-            </strong>
-
-            <span className="kpi-description">
-              Highest severity
-            </span>
-          </div>
-
         </section>
+
+        <section className="live-stat-strip" aria-label="Live dashboard totals">
+          <div className="live-stat">
+            <span className="live-stat-dot cyan" />
+            <strong>{summary ? totalEvents.toLocaleString() : "—"}</strong>
+            <span>events tracked</span>
+          </div>
+          <div className="live-stat">
+            <span className="live-stat-dot orange" />
+            <strong>
+              {wildfireIntelligence
+                ? Number(wildfireIntelligence.total_detections ?? 0).toLocaleString()
+                : "—"}
+            </strong>
+            <span>wildfire detections</span>
+          </div>
+          <div className="live-stat">
+            <span className="live-stat-dot blue" />
+            <strong>{weather.length || (loading.weather ? "—" : "0")}</strong>
+            <span>cities monitored</span>
+          </div>
+          <div className="live-stat">
+            <span className="live-stat-dot violet" />
+            <strong>
+              {loading.events && events.length === 0
+                ? "—"
+                : happeningNow.length.toLocaleString()}
+            </strong>
+            <span>active signals</span>
+          </div>
+        </section>
+
+        <nav className="discovery-nav" aria-label="Explore categories">
+          {DISCOVERY_CATEGORIES.map((category) => (
+            <button
+              key={category.id}
+              type="button"
+              className={`discovery-tab ${
+                activeDiscoveryCategory === category.id ? "active" : ""
+              }`}
+              aria-pressed={activeDiscoveryCategory === category.id}
+              onClick={() => selectDiscoveryCategory(category.id)}
+            >
+              <span aria-hidden="true">{category.icon}</span>
+              {category.label}
+            </button>
+          ))}
+        </nav>
 
         {/* =================================================
             GLOBAL EVENT MAP
@@ -662,7 +955,7 @@ const happeningNow = useMemo(() => {
     WHAT'S HAPPENING NOW
 ================================================= */}
 
-<section className="panel happening-panel">
+<section className="panel happening-panel" id="live-signals">
 
 <div className="panel-header">
 
@@ -684,7 +977,7 @@ const happeningNow = useMemo(() => {
 
 <div className="happening-grid">
 
-  {happeningNow.map((event) => (
+  {happeningNow.length > 0 ? happeningNow.map((event) => (
 
     <button
       key={event.id}
@@ -755,7 +1048,16 @@ const happeningNow = useMemo(() => {
 
     </button>
 
-  ))}
+  )) : loading.events ? (
+    Array.from({ length: 3 }, (_, index) => (
+      <div className="happening-skeleton skeleton" key={index} />
+    ))
+  ) : (
+    <div className="intentional-empty">
+      <strong>Nothing is lighting up here yet.</strong>
+      <span>Try another category or explore the global map.</span>
+    </div>
+  )}
 
 </div>
 
@@ -773,7 +1075,11 @@ const happeningNow = useMemo(() => {
   </div>
 
   <div className="weather-grid">
-    {weather.map((city) => (
+    {loading.weather && weather.length === 0
+      ? Array.from({ length: 5 }, (_, index) => (
+          <div className="weather-skeleton skeleton" key={index} />
+        ))
+      : weather.length > 0 ? weather.map((city) => (
       <div
         className="weather-card"
         key={`${city.city}-${city.country}`}
@@ -795,6 +1101,9 @@ const happeningNow = useMemo(() => {
         </div>
 
         <div className="weather-condition">
+          <span className="weather-icon" aria-hidden="true">
+            {weatherIcon(city.weather_code)}
+          </span>
           {weatherDescription(city.weather_code)}
         </div>
 
@@ -816,7 +1125,12 @@ const happeningNow = useMemo(() => {
           </span>
         </div>
       </div>
-    ))}
+    )) : (
+      <div className="intentional-empty weather-empty">
+        <strong>Weather is taking a breather.</strong>
+        <span>Live conditions will appear when the feed is available.</span>
+      </div>
+    )}
   </div>
 
   <div className="weather-source">
@@ -869,7 +1183,339 @@ const happeningNow = useMemo(() => {
 </div>
 
 </section>
-        <section className="panel map-panel">
+
+        <section className="panel news-panel" id="news-discovery">
+          <div className="panel-header">
+            <div>
+              <span className="eyebrow">THE WORLD, YOUR WAY</span>
+              <h2>Stories worth a closer look</h2>
+              <p className="section-deck">
+                Source-reported headlines from across the world, in one place.
+              </p>
+            </div>
+
+            <span className="panel-count">
+              {newsItems.length} stories
+            </span>
+          </div>
+
+          <div className="news-category-rail" aria-label="News topics">
+            {NEWS_CATEGORIES.map((category) => (
+              <button
+                key={category.id}
+                type="button"
+                className={`news-topic-tab ${
+                  activeNewsCategory === category.id ? "active" : ""
+                }`}
+                aria-pressed={activeNewsCategory === category.id}
+                onClick={() => {
+                  setActiveNewsCategory(category.id);
+                  const hasTopCategory = DISCOVERY_CATEGORIES.some(
+                    ({ id }) => id === category.id
+                  );
+                  setActiveDiscoveryCategory(
+                    hasTopCategory ? category.id : "NEWS"
+                  );
+                }}
+              >
+                <span aria-hidden="true">{category.icon}</span>
+                {category.label}
+              </button>
+            ))}
+          </div>
+
+          {loading.news && newsItems.length === 0 ? (
+            <div className="news-feature-layout" aria-label="Loading stories">
+              <div className="news-feature-skeleton skeleton" />
+              <div className="news-side-skeletons">
+                <div className="news-side-skeleton skeleton" />
+                <div className="news-side-skeleton skeleton" />
+              </div>
+            </div>
+          ) : visibleNewsItems.length > 0 ? (
+            <>
+              <div className="news-feature-layout">
+                <NewsStoryCard article={visibleNewsItems[0]} featured />
+                <div className="news-feature-side">
+                  {visibleNewsItems.slice(1, 4).map((article) => (
+                    <NewsStoryCard article={article} key={article.id} compact />
+                  ))}
+                  {visibleNewsItems.length === 1 && (
+                    <div className="news-side-note">
+                      More stories are added as independent RSS sources refresh.
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {activeNewsCategory === "TRENDING" ? (
+                <div className="news-shelves">
+                  {newsShelves.map(({ category, articles }) => (
+                    <section className="news-shelf" key={category}>
+                      <div className="news-shelf-heading">
+                        <div>
+                          <span className={`topic-pip topic-${category.toLowerCase()}`} />
+                          <h3>{categoryTitle(category)}</h3>
+                          <span>{articles.length} stories</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setActiveNewsCategory(category);
+                            const hasTopCategory = DISCOVERY_CATEGORIES.some(
+                              ({ id }) => id === category
+                            );
+                            setActiveDiscoveryCategory(
+                              hasTopCategory ? category : "NEWS"
+                            );
+                          }}
+                        >
+                          Explore <span aria-hidden="true">→</span>
+                        </button>
+                      </div>
+                      <div className="news-card-rail">
+                        {articles.map((article) => (
+                          <NewsStoryCard
+                            article={article}
+                            key={article.id}
+                            compact
+                          />
+                        ))}
+                      </div>
+                    </section>
+                  ))}
+                </div>
+              ) : (
+                <section className="news-shelf filtered-news-shelf">
+                  <div className="news-shelf-heading">
+                    <div>
+                      <span className={`topic-pip topic-${activeNewsCategory.toLowerCase()}`} />
+                      <h3>{categoryTitle(activeNewsCategory)}</h3>
+                      <span>{visibleNewsItems.length} stories</span>
+                    </div>
+                  </div>
+                  {visibleNewsItems.length > 1 ? (
+                    <div className="news-card-rail">
+                      {visibleNewsItems.slice(1).map((article) => (
+                        <NewsStoryCard
+                          article={article}
+                          key={article.id}
+                          compact
+                        />
+                      ))}
+                    </div>
+                  ) : null}
+                </section>
+              )}
+            </>
+          ) : (
+            <div className="news-empty-state">
+              <strong>Nothing is lighting up here yet.</strong>
+              <span>Try Trending or another topic. New stories arrive with the next feed update.</span>
+            </div>
+          )}
+
+          <div className="news-source-note">
+            Sources: BBC News · NPR · The Guardian · BBC Sport · India Today · The Indian Express ·
+            The Indian Express Entertainment · The Hindu Movies · TechCrunch · ScienceDaily · BBC Business.
+            Topic labels use transparent keyword rules and feed sections; weak matches stay General.
+          </div>
+        </section>
+
+        <section className="panel wildfire-panel">
+          <div className="panel-header">
+            <div>
+              <span className="eyebrow">
+                WILDFIRE PULSE · NASA FIRMS
+              </span>
+
+              <h2>Fire activity, in focus</h2>
+            </div>
+
+            <span className="panel-count">
+              {wildfireIntelligence
+                ? `${wildfireIntelligence.total_detections ?? 0} detections`
+                : "Unavailable"}
+            </span>
+          </div>
+
+          {wildfireIntelligence ? (
+            <>
+              <div className="wildfire-kpi-grid">
+                <div className="wildfire-kpi-card">
+                  <span className="kpi-label">
+                    SATELLITE DETECTIONS
+                  </span>
+
+                  <strong>
+                    {wildfireIntelligence.total_detections ?? 0}
+                  </strong>
+
+                  <span className="kpi-description">
+                    Monitored across the active grid
+                  </span>
+                </div>
+
+                <div className="wildfire-kpi-card">
+                  <span className="kpi-label">
+                    ACTIVITY HOTSPOTS
+                  </span>
+
+                  <strong>
+                    {wildfireIntelligence.hotspot_count ?? 0}
+                  </strong>
+
+                  <span className="kpi-description">
+                    Detection clusters identified
+                  </span>
+                </div>
+
+                <div className="wildfire-kpi-card">
+                  <span className="kpi-label">
+                    HIGH-FRP DETECTIONS
+                  </span>
+
+                  <strong>
+                    {wildfireIntelligence.high_frp_detections ?? 0}
+                  </strong>
+
+                  <span className="kpi-description">
+                    Elevated fire radiative power
+                  </span>
+                </div>
+
+                <div className="wildfire-kpi-card accent">
+                  <span className="kpi-label">
+                    TOTAL FRP
+                  </span>
+
+                  <strong>
+                    {`${Number(
+                      wildfireIntelligence.total_frp_mw ?? 0
+                    ).toFixed(2)} MW`}
+                  </strong>
+
+                  <span className="kpi-description">
+                    Combined fire power observed
+                  </span>
+                </div>
+              </div>
+
+              <div className="wildfire-hotspots">
+                <div className="wildfire-hotspots-header">
+                  <span className="eyebrow">
+                    TOP WILDFIRE ACTIVITY
+                  </span>
+                </div>
+
+                {wildfireHotspots.length > 0 ? (
+                  <div className="wildfire-hotspot-list">
+                    {wildfireHotspots.map((hotspot, index) => (
+                      <button
+                        type="button"
+                        key={`${hotspot.latitude}-${hotspot.longitude}-${index}`}
+                        className="wildfire-hotspot-item"
+                        onClick={() =>
+                          focusMapLocation(
+                            hotspot.latitude,
+                            hotspot.longitude
+                          )
+                        }
+                        aria-label={`Explore wildfire hotspot at ${formatCoordinate(
+                          hotspot.latitude,
+                          "lat"
+                        )}, ${formatCoordinate(hotspot.longitude, "lon")}`}
+                      >
+                        <div className="wildfire-hotspot-title">
+                          {formatCoordinate(
+                            hotspot.latitude,
+                            "lat"
+                          )} · {formatCoordinate(
+                            hotspot.longitude,
+                            "lon"
+                          )}
+                        </div>
+
+                        <div className="wildfire-hotspot-metrics">
+                          <span>
+                            {hotspot.detections} detections
+                          </span>
+
+                          <span>
+                            {`• ${Number(
+                              hotspot.total_frp_mw
+                            ).toFixed(2)} MW`}
+                          </span>
+                        </div>
+
+                        <div className="wildfire-hotspot-average">
+                          Avg FRP {Number(
+                            hotspot.average_frp_mw
+                          ).toFixed(2)} MW
+                        </div>
+
+                        {hotspot.satellites.length > 0 && (
+                          <div className="wildfire-hotspot-satellites">
+                            {hotspot.satellites.join(", ")}
+                          </div>
+                        )}
+                        <span className="hotspot-action">
+                          View on map <span aria-hidden="true">↗</span>
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="wildfire-empty-state">
+                    <span className="wildfire-empty-status">
+                      ●
+                    </span>
+
+                    <div>
+                      <strong>
+                        No significant wildfire hotspots detected
+                      </strong>
+
+                      <p>
+                        Current satellite detections remain
+                        below the monitored activity thresholds.
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </>
+          ) : loading.wildfire ? (
+            <div className="wildfire-kpi-grid wildfire-loading-grid" aria-label="Loading wildfire intelligence">
+              {Array.from({ length: 4 }, (_, index) => (
+                <div className="wildfire-kpi-skeleton skeleton" key={index} />
+              ))}
+            </div>
+          ) : (
+            <div className="wildfire-empty-state">
+              <span className="wildfire-empty-status">
+                ●
+              </span>
+
+              <div>
+                <strong>
+                  Wildfire intelligence unavailable
+                </strong>
+
+                <p>
+                  Satellite hotspot analysis is temporarily
+                  unavailable. Monitoring remains active.
+                </p>
+              </div>
+            </div>
+          )}
+
+          <div className="wildfire-source">
+            Source: NASA FIRMS · VIIRS NOAA-21 NRT
+          </div>
+        </section>
+
+        <section className="panel map-panel" id="global-map">
 
           <div className="panel-header">
 
@@ -884,7 +1530,7 @@ const happeningNow = useMemo(() => {
             </div>
 
             <span className="panel-count">
-              {filteredEvents.length} events
+              {filteredEvents.length.toLocaleString()} events · {weather.length} live cities
             </span>
 
           </div>
@@ -907,6 +1553,7 @@ const happeningNow = useMemo(() => {
                       ? "active"
                       : ""
                   }`}
+                  aria-pressed={severityFilter === severity}
                   onClick={() =>
                     setSeverityFilter(
                       severity
@@ -919,11 +1566,28 @@ const happeningNow = useMemo(() => {
 
             </div>
 
+            <label className="category-filter">
+              <span>Category</span>
+              <select
+                value={categoryFilter}
+                onChange={(event) =>
+                  setCategoryFilter(event.target.value)
+                }
+              >
+                <option value="ALL">ALL CATEGORIES</option>
+                <option value="earthquake">EARTHQUAKES</option>
+                <option value="wildfire">WILDFIRES</option>
+                <option value="weather">WEATHER</option>
+                <option value="news">NEWS</option>
+              </select>
+            </label>
+
             <div className="event-search">
 
               <input
                 type="text"
                 placeholder="Search events, countries, regions..."
+                aria-label="Search events, countries, and regions"
                 value={search}
                 onChange={(e) =>
                   setSearch(e.target.value)
@@ -938,16 +1602,97 @@ const happeningNow = useMemo(() => {
             events={filteredEvents}
             severityFilter="ALL"
             onEventSelect={setSelectedEvent}
+            focusLocation={mapFocusTarget}
           />
 
+          <div className="map-legend" aria-label="Map marker categories">
+            <span><i className="legend-dot earthquake" /> Earthquakes</span>
+            <span><i className="legend-dot wildfire" /> Wildfires</span>
+            <span><i className="legend-dot weather" /> Weather</span>
+            <span><i className="legend-dot news" /> News</span>
+          </div>
+
+          <div className="map-source">
+            Event sources include USGS earthquakes, NASA FIRMS detections,
+            and RSS articles when location coordinates are available.
+          </div>
+        </section>
+
+        <section className="panel recent-events-panel">
+          <div className="panel-header">
+            <div>
+              <span className="eyebrow">EVENT TIMELINE</span>
+              <h2>Recent Events</h2>
+            </div>
+
+            <span className="panel-count">
+              Newest first · {recentEvents.length} shown
+            </span>
+          </div>
+
+          {recentEvents.length > 0 ? (
+            <div className="recent-events-list">
+              {recentEvents.map((event) => (
+                <button
+                  type="button"
+                  className="recent-event-row"
+                  key={event.id}
+                  aria-label={`Open event details: ${event.title || "event"}`}
+                  onClick={() => setSelectedEvent(event)}
+                >
+                  <span
+                    className={`recent-event-marker ${
+                      event.category?.toLowerCase() || "other"
+                    }`}
+                    aria-hidden="true"
+                  />
+
+                  <div className="recent-event-main">
+                    <div className="recent-event-meta">
+                      <span>
+                        {(event.category || "event").toUpperCase()}
+                      </span>
+                      <span>{event.source || "Unknown source"}</span>
+                      {(event.region || event.country) && (
+                        <span>
+                          {[event.region, event.country]
+                            .filter(Boolean)
+                            .join(", ")}
+                        </span>
+                      )}
+                    </div>
+                    <strong>{event.title}</strong>
+                  </div>
+
+                  <time className="recent-event-time">
+                    {event.occurred_at
+                      ? formatDate(event.occurred_at)
+                      : "Time unavailable"}
+                  </time>
+                </button>
+              ))}
+            </div>
+          ) : (
+            loading.events ? (
+              <div className="timeline-skeleton-list" aria-label="Loading recent events">
+                {Array.from({ length: 4 }, (_, index) => (
+                  <div className="timeline-skeleton skeleton" key={index} />
+                ))}
+              </div>
+            ) : (
+              <div className="news-empty-state">
+                Nothing is lighting up here yet. Try another category or return to Global.
+              </div>
+            )
+          )}
         </section>
 
         {/* =================================================
-            AI SITUATION BRIEF
+            GLOBAL INTELLIGENCE BRIEF
         ================================================= */}
 
         <section
-          className="panel"
+          className="panel global-brief-panel"
           style={{
             marginTop: "24px",
             background:
@@ -973,7 +1718,7 @@ const happeningNow = useMemo(() => {
             >
 
               <span className="eyebrow">
-                AI INTELLIGENCE
+                ◉ WORLD PULSE · SOURCE-BASED
               </span>
 
               <h2
@@ -981,7 +1726,7 @@ const happeningNow = useMemo(() => {
                   marginBottom: "12px",
                 }}
               >
-                Situation Brief
+                What’s moving right now
               </h2>
 
               <p
@@ -995,6 +1740,27 @@ const happeningNow = useMemo(() => {
               >
                 {situationBrief.headline}
               </p>
+
+              <ul className="global-brief-facts">
+                {globalBriefFacts.length > 0 ? (
+                  globalBriefFacts.map((fact) => (
+                    <li key={fact}>{fact}</li>
+                  ))
+                ) : (
+                  <li>
+                    The brief will populate as verified event,
+                    weather, wildfire, and news data become available.
+                  </li>
+                )}
+              </ul>
+
+              <div className="brief-source-chips" aria-label="Brief data sources">
+                <span>USGS</span>
+                <span>NASA FIRMS</span>
+                <span>Open-Meteo</span>
+                <span>RSS</span>
+                <span>Observed data · Rule-based</span>
+              </div>
 
             </div>
 
@@ -1035,7 +1801,7 @@ const happeningNow = useMemo(() => {
           >
 
             <BriefCard
-              label="PRIMARY REGION"
+              label="MOST RECORDED REGION"
               value={
                 situationBrief.topRegion
               }
@@ -1067,6 +1833,74 @@ const happeningNow = useMemo(() => {
 
         </section>
 
+        <section className="panel trends-panel" id="activity-trends">
+          <div className="panel-header">
+            <div>
+              <span className="eyebrow">OBSERVED ACTIVITY</span>
+              <h2>Event Trends</h2>
+            </div>
+            <span className="panel-count">
+              Deterministic · Based on stored events
+            </span>
+          </div>
+
+          <div className="trend-metrics">
+            <div className="trend-metric">
+              <span>LAST 24 HOURS</span>
+              <strong>
+                {activityAnalytics?.events_last_24h ?? 0}
+              </strong>
+            </div>
+            <div className="trend-metric">
+              <span>LAST 7 DAYS</span>
+              <strong>
+                {activityAnalytics?.events_last_7d ?? 0}
+              </strong>
+            </div>
+          </div>
+
+          <div className="trend-columns">
+            <div>
+              <h3>Most active regions · 7 days</h3>
+              {(activityAnalytics?.top_active_regions || []).length > 0 ? (
+                <div className="trend-list">
+                  {activityAnalytics.top_active_regions.map((region) => (
+                    <div className="trend-row" key={region.region}>
+                      <span>{region.region}</span>
+                      <strong>{region.events_last_7d}</strong>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="trend-empty">
+                  No recent events have a known region or country.
+                </p>
+              )}
+            </div>
+
+            <div>
+              <h3>Emerging activity · 7-day comparison</h3>
+              {(activityAnalytics?.emerging_regions || []).length > 0 ? (
+                <div className="trend-list">
+                  {activityAnalytics.emerging_regions.map((region) => (
+                    <div className="trend-row" key={region.region}>
+                      <span>{region.region}</span>
+                      <strong>
+                        +{region.change} · {region.events_last_7d} total
+                      </strong>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="trend-empty">
+                  No regions currently show an increase over the prior
+                  7-day period.
+                </p>
+              )}
+            </div>
+          </div>
+        </section>
+
         {/* =================================================
             ANALYTICS GRID
         ================================================= */}
@@ -1075,7 +1909,7 @@ const happeningNow = useMemo(() => {
           style={{
             display: "grid",
             gridTemplateColumns:
-              "repeat(auto-fit, minmax(420px, 1fr))",
+              "repeat(auto-fit, minmax(min(420px, 100%), 1fr))",
             gap: "24px",
             marginTop: "24px",
           }}
@@ -1391,12 +2225,11 @@ const happeningNow = useMemo(() => {
 
             <div className="ranking-list">
 
-              {(summary.top_countries ||
+              {(summary?.top_countries ||
                 []).map(
                 (country, index) => {
                   const topCount =
-                    summary
-                      .top_countries?.[0]
+                    summary?.top_countries?.[0]
                       ?.event_count || 1;
 
                   const percentage =
@@ -1455,7 +2288,7 @@ const happeningNow = useMemo(() => {
         </section>
 
         {/* =================================================
-            EMERGING HOTSPOTS
+            EVENT CONCENTRATION
         ================================================= */}
 
         <section className="panel">
@@ -1464,16 +2297,16 @@ const happeningNow = useMemo(() => {
 
             <div>
               <span className="eyebrow">
-                RISK INTELLIGENCE
+                ACTIVITY CONCENTRATION
               </span>
 
               <h2>
-                Emerging Hotspots
+                Most Recorded Regions
               </h2>
             </div>
 
             <span className="panel-count">
-              Ranked by activity
+              Ranked by stored event volume
             </span>
 
           </div>
@@ -1538,7 +2371,7 @@ const happeningNow = useMemo(() => {
                           fontWeight: 700,
                         }}
                       >
-                        ● PRIORITY
+                        HIGH / CRITICAL
                       </span>
                     )}
 
@@ -1601,7 +2434,7 @@ const happeningNow = useMemo(() => {
                         {stats.high +
                           stats.critical}
                       </strong>{" "}
-                      priority
+                      high / critical
                     </span>
 
                   </div>
@@ -1636,7 +2469,7 @@ const happeningNow = useMemo(() => {
 
           <div className="region-grid">
 
-            {(summary.top_regions ||
+            {(summary?.top_regions ||
               []).map(
               (region, index) => (
                 <div
@@ -1688,8 +2521,7 @@ const happeningNow = useMemo(() => {
 
             <span className="panel-count">
               {
-                summary
-                  .recent_high_severity_events
+                summary?.recent_high_severity_events
                   ?.length || 0
               } events
             </span>
@@ -1699,8 +2531,7 @@ const happeningNow = useMemo(() => {
           <div className="events-list">
 
             {(
-              summary
-                .recent_high_severity_events ||
+              summary?.recent_high_severity_events ||
               []
             ).map((event) => (
 
@@ -1890,7 +2721,7 @@ const happeningNow = useMemo(() => {
             </div>
 
             {/* =================================================
-                AI EVENT ASSESSMENT
+                RULE-BASED EVENT ASSESSMENT
             ================================================= */}
 
             <section className="intelligence-section assessment-section">
@@ -1899,7 +2730,7 @@ const happeningNow = useMemo(() => {
 
                 <div>
                   <span className="eyebrow">
-                    AI INTELLIGENCE
+                    RULE-BASED ASSESSMENT
                   </span>
 
                   <h3>
@@ -1908,7 +2739,7 @@ const happeningNow = useMemo(() => {
                 </div>
 
                 <span className="ai-indicator">
-                  ● ANALYZED
+                  ● DERIVED
                 </span>
 
               </div>
@@ -1949,11 +2780,11 @@ const happeningNow = useMemo(() => {
 
                 <div>
                   <span className="eyebrow">
-                    INTELLIGENCE CONTEXT
+                    SOURCE-BASED CONTEXT
                   </span>
 
                   <h3>
-                    Why It Matters
+                    Event Context
                   </h3>
                 </div>
 
@@ -2434,6 +3265,68 @@ function BriefCard({
   );
 }
 
+function NewsStoryCard({ article, featured = false, compact = false }) {
+  const category = normalizeNewsCategory(article.event_type);
+  const summary = article.description?.trim();
+
+  return (
+    <article
+      className={`news-story-card topic-${category.toLowerCase()} ${
+        featured ? "featured" : ""
+      } ${compact ? "compact" : ""}`}
+    >
+      <div className="news-story-art">
+        {article.image_url ? (
+          <img
+            src={article.image_url}
+            alt=""
+            loading="lazy"
+            referrerPolicy="no-referrer"
+          />
+        ) : (
+          <span className="news-art-mark" aria-hidden="true">
+            {category === "WILDFIRES" ? "♨" : "◉"}
+          </span>
+        )}
+        {featured && <span className="featured-label">FEATURED STORY</span>}
+      </div>
+
+      <div className="news-story-body">
+        <div className="news-story-meta">
+          <span className={`news-topic-pill topic-${category.toLowerCase()}`}>
+            {categoryTitle(category)}
+          </span>
+          <span className="news-story-source">{article.source}</span>
+          <time dateTime={article.occurred_at || undefined}>
+            {formatRelativeTime(article.occurred_at)}
+          </time>
+        </div>
+
+        <h3>{article.title}</h3>
+
+        {summary && (
+          <p>
+            {summary.length > (featured ? 260 : 180)
+              ? `${summary.slice(0, featured ? 257 : 177).trimEnd()}…`
+              : summary}
+          </p>
+        )}
+
+        {article.source_url && (
+          <a
+            className="news-read-link"
+            href={article.source_url}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Read story <span aria-hidden="true">↗</span>
+          </a>
+        )}
+      </div>
+    </article>
+  );
+}
+
 /* =========================================================
    SEVERITY ROW
 ========================================================= */
@@ -2679,6 +3572,26 @@ function getWhyItMatters(event) {
    HELPERS
 ========================================================= */
 
+function normalizeArrayResponse(data, property) {
+  if (Array.isArray(data)) {
+    return data;
+  }
+
+  if (Array.isArray(data?.[property])) {
+    return data[property];
+  }
+
+  throw new Error(`Expected an array response or a ${property} array.`);
+}
+
+function requireObjectResponse(data) {
+  if (data && typeof data === "object" && !Array.isArray(data)) {
+    return data;
+  }
+
+  throw new Error("Expected an object response.");
+}
+
 function formatConfidence(
   confidence
 ) {
@@ -2699,6 +3612,22 @@ function formatConfidence(
   return `${Math.round(
     value * 100
   )}%`;
+}
+
+function formatCoordinate(value, axis) {
+  const numericValue = Number(value);
+
+  if (!Number.isFinite(numericValue)) {
+    return "—";
+  }
+
+  const absoluteValue = Math.abs(numericValue).toFixed(2);
+
+  if (axis === "lat") {
+    return `${absoluteValue}°${numericValue >= 0 ? "N" : "S"}`;
+  }
+
+  return `${absoluteValue}°${numericValue >= 0 ? "E" : "W"}`;
 }
 
 
@@ -2725,6 +3654,92 @@ function formatDate(date) {
       timeStyle: "short",
     }
   );
+}
+
+function formatClockTime(date) {
+  return new Date(date).toLocaleTimeString("en-IN", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function formatRelativeTime(value) {
+  if (!value) {
+    return "Time unavailable";
+  }
+
+  const date = new Date(value);
+  const elapsed = Date.now() - date.getTime();
+  if (!Number.isFinite(elapsed) || elapsed < 0) {
+    return formatDate(value);
+  }
+
+  const minutes = Math.floor(elapsed / 60_000);
+  if (minutes < 1) {
+    return "Just now";
+  }
+  if (minutes < 60) {
+    return `${minutes}m ago`;
+  }
+
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) {
+    return `${hours}h ago`;
+  }
+
+  const days = Math.floor(hours / 24);
+  return days < 7 ? `${days}d ago` : formatDate(value);
+}
+
+function normalizeNewsCategory(value) {
+  const category = value?.trim().toUpperCase();
+  const legacyCategories = {
+    ECONOMY: "BUSINESS",
+    TECHNOLOGY: "TECH",
+    SOCIETY: "GENERAL",
+    GEOPOLITICS: "WORLD",
+    CONFLICT: "WORLD",
+    DISASTER: "GENERAL",
+    GENERAL: "GENERAL",
+  };
+
+  if (legacyCategories[category]) {
+    return legacyCategories[category];
+  }
+
+  return NEWS_CATEGORIES.some(({ id }) => id === category)
+    ? category
+    : "GENERAL";
+}
+
+function categoryTitle(category) {
+  const titles = {
+    BOLLYWOOD: "Bollywood",
+    BUSINESS: "Business",
+    CLIMATE: "Climate",
+    ENTERTAINMENT: "Entertainment",
+    GENERAL: "General",
+    INDIA: "India",
+    SCIENCE: "Science",
+    SPORTS: "Sports",
+    TECH: "Tech",
+    WORLD: "World",
+  };
+
+  return titles[category] || "General";
+}
+
+function weatherIcon(code) {
+  const value = Number(code);
+  if (value === 0) return "☀";
+  if (value === 1 || value === 2) return "⛅";
+  if (value === 3) return "☁";
+  if (value === 45 || value === 48) return "≋";
+  if (value >= 51 && value <= 67) return "☂";
+  if (value >= 71 && value <= 77) return "❄";
+  if (value >= 80 && value <= 82) return "☔";
+  if (value >= 95) return "ϟ";
+  return "◌";
 }
 
 function weatherDescription(code) {

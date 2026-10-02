@@ -8,6 +8,8 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from ..models.event import Event
 from ..intelligence.scoring import score_event
+from ..intelligence.analytics import build_activity_analytics
+from ..intelligence.wildfire import analyze_wildfires
 
 
 router = APIRouter(
@@ -149,3 +151,46 @@ def intelligence_summary(db: Session = Depends(get_db)):
         "top_regions": top_regions,
         "recent_high_severity_events": recent_events,
     }
+
+
+@router.get("/wildfires")
+def wildfire_intelligence(db: Session = Depends(get_db)):
+    """Return deterministic hotspot analysis of stored FIRMS detections."""
+    events = (
+        db.query(Event)
+        .filter(Event.category == "wildfire")
+        .all()
+    )
+    return analyze_wildfires(events)
+
+
+@router.get("/analytics")
+def activity_analytics(db: Session = Depends(get_db)):
+    """Return observed activity and recent regional concentration metrics."""
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    recent_events = (
+        db.query(Event)
+        .filter(
+            Event.occurred_at >= now - timedelta(days=14),
+            Event.occurred_at <= now,
+        )
+        .all()
+    )
+    analytics = build_activity_analytics(recent_events, now)
+    category_rows = (
+        db.query(
+            Event.category,
+            func.count(Event.id).label("event_count"),
+        )
+        .group_by(Event.category)
+        .order_by(func.count(Event.id).desc())
+        .all()
+    )
+    analytics["category_distribution"] = [
+        {
+            "category": category or "other",
+            "count": count,
+        }
+        for category, count in category_rows
+    ]
+    return analytics

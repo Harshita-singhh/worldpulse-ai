@@ -23,11 +23,29 @@ body {
       transparent 35%
     ),
     #07090d;
+  overflow-x: hidden;
+  scroll-behavior: smooth;
 }
 
 button,
-input {
+input,
+select {
   font: inherit;
+}
+
+button,
+a,
+select,
+input {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible {
+  outline: 2px solid #7fd9eb;
+  outline-offset: 3px;
 }
 
 .app {
@@ -93,6 +111,16 @@ input {
   box-shadow: 0 0 10px rgba(101, 212, 155, 0.7);
 }
 
+.last-updated {
+  padding-left: 8px;
+  border-left: 1px solid #27332e;
+  color: #70817a;
+  font-size: 9px;
+  font-weight: 500;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+}
+
 /* ---------------- Dashboard ---------------- */
 
 .dashboard {
@@ -103,7 +131,7 @@ input {
 
 .kpi-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(5, 1fr);
   gap: 15px;
   margin-bottom: 15px;
 }
@@ -544,6 +572,10 @@ footer {
 @media (max-width: 650px) {
   .topbar {
     padding: 0 18px;
+  }
+
+  .last-updated {
+    display: none;
   }
 
   .dashboard,

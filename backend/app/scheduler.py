@@ -1,6 +1,14 @@
+import logging
+from datetime import datetime
+
 from apscheduler.schedulers.background import BackgroundScheduler
 
 from .ingestion.usgs import ingest_usgs_earthquakes
+from .ingestion.news import ingest_news
+from .wildfires.service import ingest_wildfires
+
+
+logger = logging.getLogger(__name__)
 
 
 # =========================================================
@@ -35,6 +43,42 @@ def run_usgs_ingestion():
         )
 
 
+def run_wildfire_ingestion():
+    """Fetch and store new FIRMS detections without stopping the API."""
+    print("WorldPulse scheduler: running wildfire ingestion...")
+
+    try:
+        result = ingest_wildfires()
+        print(
+            "WorldPulse scheduler: wildfire ingestion "
+            f"fetched={result['fetched']}, "
+            f"inserted={result['inserted']}, "
+            f"skipped={result['skipped']}"
+        )
+    except Exception as exc:
+        logger.exception(
+            "WorldPulse scheduler: wildfire ingestion failed: %s",
+            exc,
+        )
+
+
+def run_news_ingestion():
+    """Fetch recent RSS articles while keeping source failures isolated."""
+    logger.info("WorldPulse scheduler: running news ingestion...")
+
+    try:
+        result = ingest_news()
+        print(
+            "WorldPulse scheduler: news ingestion "
+            f"fetched={result['fetched']}, "
+            f"inserted={result['inserted']}, "
+            f"skipped={result['skipped']}, "
+            f"feeds_failed={len(result['feed_errors'])}"
+        )
+    except Exception:
+        logger.exception("WorldPulse scheduler: news ingestion failed")
+
+
 # =========================================================
 # START
 # =========================================================
@@ -45,15 +89,32 @@ def start_scheduler():
     if scheduler.running:
         return
 
-    # Run once immediately when the backend starts.
-    run_usgs_ingestion()
-
-    # Continue automatically every 15 minutes.
     scheduler.add_job(
         run_usgs_ingestion,
         trigger="interval",
         minutes=15,
         id="usgs_ingestion",
+        next_run_time=datetime.now(scheduler.timezone),
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+    scheduler.add_job(
+        run_wildfire_ingestion,
+        trigger="interval",
+        minutes=15,
+        id="wildfire_ingestion",
+        next_run_time=datetime.now(scheduler.timezone),
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+    scheduler.add_job(
+        run_news_ingestion,
+        trigger="interval",
+        minutes=30,
+        id="news_ingestion",
+        next_run_time=datetime.now(scheduler.timezone),
         replace_existing=True,
         max_instances=1,
         coalesce=True,
@@ -63,7 +124,7 @@ def start_scheduler():
 
     print(
         "WorldPulse scheduler: started "
-        "(USGS ingestion every 15 minutes)"
+        "(USGS and wildfire every 15 minutes; news every 30 minutes)"
     )
 
 
